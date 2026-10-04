@@ -40,3 +40,39 @@ The value is not malformed.
 ## `cp` or Comparison 
 `cp` subtracts it's operand from `a` and discards the value. However it set's the respective
 flag which can then be used for other operations.
+
+
+## JUMPS
+
+Rhw CPU has a special-purpose register `PC` which stores the address of the instruction 
+currently being executed. Jump allows us to arbitraly modify this `PC` register. 
+(Kind of the thing flow-control statements do in other languages).
+
+Instruction	  Mnemonic	  Effect
+Jump	          jp	      Jump execution to a location
+Jump Relative	  jr	      Jump to a location close by
+Call	          call	    Call a subroutine
+Return	        ret	      Return from a subroutine
+
+
+### Difference between `jp` and `jr` 
+`jr` jumps relative to the current value of the `PC` register 
+and can only go forward/backward by `128` bytes. The advantage of `jr` is that 
+it takes `2 bytes` of storage instead of `3` taken by `jp` and also costs one less 
+cpu cycle.
+
+### NOTE: Conditional Jumps can be achieved by using a label as in the following example. 
+
+` ; Copy the tile data
+  ld de, Tiles
+  ld hl, $9000
+  ld bc, Tiles.End - Tiles
+  CopyTiles:
+  ld a, [de]
+  ld [hli], a
+  inc de
+  dec bc
+  ld a, b
+  or a, c
+  jr nz, CopyTiles
+`
