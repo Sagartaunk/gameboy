@@ -17,41 +17,19 @@ WaitVBlank:
     ld de, Tiles
     ld hl, $9000
     ld bc, TilesEnd - Tiles
+    call MemCopy
 
-CopyTiles:
-    ; Move value of register `de` to `hli`
-    ld a, [de]
-    ld [hli], a
-    inc de
-    dec bc
-    ld a, b
-    or a,c
-    jp nz, CopyTiles
 
     ; Copy the tilemap
     ld de, Tilemap
     ld hl, $9800
     ld bc, TilemapEnd - Tilemap
-CopyTilemap:
-    ld a, [de]
-    ld [hli], a
-    inc de
-    dec bc
-    ld a, b
-    or a, c
-    jp nz, CopyTilemap
+    call MemCopy
 
     ld de, Paddle
     ld hl, $8000
     ld bc, PaddleEnd-Paddle
-CopyPaddle:
-    ld a, [de]
-    ld [hli], a
-    inc de
-    dec bc
-    ld a, b
-    or a,c
-    jp nz, CopyPaddle
+    call MemCopy
 
 
      ; Clear all 160 bytes of OAM
@@ -99,6 +77,19 @@ WaitVBlank2:
     ld [STARTOF(OAM) + 1], a
     jp Main
 
+; Copy bytes from one area to another.
+; @param de: Source
+; @param hl: Destination
+; @param bc: Length
+MemCopy:
+    ld a, [de]
+    ld [hli], a
+    inc de
+    dec bc
+    ld a, b
+    or a, c
+    jp nz, MemCopy
+    ret
 
 
 Tiles:
@@ -369,3 +360,6 @@ Paddle:
     dw `00000000
     dw `00000000
 PaddleEnd:
+
+SECTION "Counter", WRAM0
+wFrameCounter: db
