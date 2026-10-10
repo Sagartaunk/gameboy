@@ -76,3 +76,21 @@ cpu cycle.
   or a, c
   jr nz, CopyTiles
 `
+## Memory:
+There are two types of `Ram` in a gameboy, `High Ram` and `Work Ram`
+
+### High Ram: 
+It is a small memory region which is extremely fast and convienet to access
+from the cpu. It is used to store small amounts of data. 
+
+### Work Ram:
+Normal ram.
+
+
+## Registers:
+These are small places of memory that the CPU uses as a workspace. 
+There are registers for everything and also a few `General Purpose Registers`.
+These differ from the countless registers a cpu has for performing calculations 
+as they do no specialise in one task and can be used for anything as the name implies. 
+
+The gameboy has 7 of these General Purpose registers which are `8-bit` in memory.
