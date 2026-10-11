@@ -4,45 +4,46 @@ INCLUDE "hardware.inc"
 DEF BRICK_LEFT EQU $05
 DEF BRICK_RIGHT EQU $06
 DEF BLANK_TILE EQU $08
+DEF DIGIT_OFFSET EQU $1A
+DEF SCORE_TENS   EQU $9870
+DEF SCORE_ONES   EQU $9871
+
+
 
 SECTION "Header", ROM0[$100]
 
     jp EntryPoint
         ds $150-@, 0
 EntryPoint:
+    ; Wait for VBlank so it's safe to turn the LCD off
 WaitVBlank:
     ld a, [rLY]
     cp 144
     jp c, WaitVBlank
 
-    ;Turn the lcd off
-    ld a,0
+    ; Turn the LCD off
+    ld a, 0
     ld [rLCDC], a
 
-    ld de, Tiles
-    ld hl, $9000
-    ld bc, TilesEnd - Tiles
-    call MemCopy
-
-
-    ; Copy the tilemap
-    ld de, Tilemap
-    ld hl, $9800
-    ld bc, TilemapEnd - Tilemap
-    call MemCopy
-
+    ; Sprite tiles live at $8000 for the whole game, so load them once here.
+    ; (The title screen only uses BG tiles at $9000, so it won't touch these.)
     ld de, Paddle
     ld hl, $8000
-    ld bc, PaddleEnd-Paddle
+    ld bc, PaddleEnd - Paddle
     call MemCopy
 
-    ; Copy the ball tile
     ld de, Ball
     ld hl, $8010
     ld bc, BallEnd - Ball
     call MemCopy
 
+    ; Initialize input state BEFORE the title screen polls the joypad
+    ld a, 0
+    ld [wCurKeys], a
+    ld [wNewKeys], a
+
 TitleScreen:
+    ; Load the title screen's tiles and map (LCD is still off, so this is safe)
     ld de, Unbricked_Title_Screen_Tileset_Begin
     ld hl, $9000
     ld bc, Unbricked_Title_Screen_Tileset_End - Unbricked_Title_Screen_Tileset_Begin
@@ -53,21 +54,49 @@ TitleScreen:
     ld bc, Unbricked_Title_Screen_Map_End - Unbricked_Title_Screen_Map_Begin
     call MemCopy
 
-    ; Turn the LCD on
-    ld a, LCDC_ON | LCDC_BG_ON
-    ld [rLCDC], a
-
-    ; During the first (blank) frame, initialize display registers
+    ; Palette
     ld a, %11100100
     ld [rBGP], a
 
+    ; Turn the LCD on (background only, no sprites on the title screen)
+    ld a, LCDC_ON | LCDC_BG_ON
+    ld [rLCDC], a
+
 TitleScreenLoop:
+    ; Run once per frame: wait for the current VBlank to end, then for the next to begin
+.waitNotVBlank:
+    ld a, [rLY]
+    cp 144
+    jr nc, .waitNotVBlank
+.waitVBlank:
+    ld a, [rLY]
+    cp 144
+    jr c, .waitVBlank
+
     call UpdateKeys
-    ld a, [wCurKeys]
+    ld a, [wNewKeys]        ; newly-pressed keys only, so a held Start from boot is ignored
     and PAD_START
     jr z, TitleScreenLoop
 
-     ; Clear all 160 bytes of OAM
+StartGame:
+    ; We're at the start of VBlank here, so turning the LCD off is safe.
+    ; Doing this also makes VRAM and OAM freely writable.
+    ld a, 0
+    ld [rLCDC], a
+
+    ; Swap the title screen graphics out for the game graphics.
+    ; (Without this the game would run on top of the title tiles/map.)
+    ld de, Tiles
+    ld hl, $9000
+    ld bc, TilesEnd - Tiles
+    call MemCopy
+
+    ld de, Tilemap
+    ld hl, $9800
+    ld bc, TilemapEnd - Tilemap
+    call MemCopy
+
+    ; Clear all 160 bytes of OAM
     ld a, 0
     ld b, 160
     ld hl, STARTOF(OAM)
@@ -86,10 +115,10 @@ ClearOam:
     ld [hli], a
     ld [hli], a         ; attributes (also 0)
 
-    ;Initialise the paddle sprite
-    ld a, 100+16
+    ; Initialize the ball sprite in OAM
+    ld a, 100 + 16
     ld [hli], a
-    ld a, 32+8
+    ld a, 32 + 8
     ld [hli], a
     ld a, 1
     ld [hli], a
@@ -102,17 +131,9 @@ ClearOam:
     ld a, -1
     ld [wBallMomentumY], a
 
-
-
-
-    ; Turn the LCD on
-    ld a, LCDC_ON | LCDC_BG_ON | LCDC_OBJ_ON
-    ld [rLCDC], a
-
-    ; During the first (blank) frame, initialize display registers
+    ; Palettes
     ld a, %11100100
     ld [rBGP], a
-    ld a, %11100100
     ld [rOBP0], a
 
     ; Initialize variables
@@ -120,6 +141,11 @@ ClearOam:
     ld [wFrameCounter], a
     ld [wCurKeys], a
     ld [wNewKeys], a
+    ld [wScore], a
+
+    ; Turn the LCD back on with sprites enabled
+    ld a, LCDC_ON | LCDC_BG_ON | LCDC_OBJ_ON
+    ld [rLCDC], a
 
 Main:
     ld a, [rLY]
@@ -322,6 +348,7 @@ CheckAndHandleBrick:
     ld [hl], BLANK_TILE
     inc hl
     ld [hl], BLANK_TILE
+    call IncreaseScorePackedBCD
 CheckAndHandleBrickRight:
     cp a, BRICK_RIGHT
     ret nz
@@ -329,6 +356,7 @@ CheckAndHandleBrickRight:
     ld [hl], BLANK_TILE
     dec hl
     ld [hl], BLANK_TILE
+    call IncreaseScorePackedBCD
     ret
 
 
@@ -380,6 +408,27 @@ IsWallTile:
     cp a, $06
     ret z
     cp a, $07
+    ret
+
+IncreaseScorePackedBCD:
+    ld hl, wScore
+    ld a, [hl]
+    add 1
+    ld [hl], a
+    call UpdateScoreBoard
+    ret
+; Read the packed BCD score from wScore and updates the score display
+UpdateScoreBoard:
+    ld a, [wScore]      ; Get the Packed score
+    and %11110000       ; Mask the lower nibble
+    swap a              ; Move the upper nibble to the lower nibble (divide by 16)
+    add a, DIGIT_OFFSET ; Offset + add to get the digit tile
+    ld [SCORE_TENS], a  ; Show the digit on screen
+
+    ld a, [wScore]      ; Get the packed score again
+    and %00001111       ; Mask the upper nibble
+    add a, DIGIT_OFFSET ; Offset + add to get the digit tile again
+    ld [SCORE_ONES], a  ; Show the digit on screen
     ret
 
 
@@ -620,6 +669,98 @@ Tiles:
 	dw `00222222
 	dw `22222222
 
+	    ; digits
+    ; 0
+    dw `33333333
+    dw `33000033
+    dw `30033003
+    dw `30033003
+    dw `30033003
+    dw `30033003
+    dw `33000033
+    dw `33333333
+    ; 1
+    dw `33333333
+    dw `33300333
+    dw `33000333
+    dw `33300333
+    dw `33300333
+    dw `33300333
+    dw `33000033
+    dw `33333333
+    ; 2
+    dw `33333333
+    dw `33000033
+    dw `30330003
+    dw `33330003
+    dw `33000333
+    dw `30003333
+    dw `30000003
+    dw `33333333
+    ; 3
+    dw `33333333
+    dw `30000033
+    dw `33330003
+    dw `33000033
+    dw `33330003
+    dw `33330003
+    dw `30000033
+    dw `33333333
+    ; 4
+    dw `33333333
+    dw `33000033
+    dw `30030033
+    dw `30330033
+    dw `30330033
+    dw `30000003
+    dw `33330033
+    dw `33333333
+    ; 5
+    dw `33333333
+    dw `30000033
+    dw `30033333
+    dw `30000033
+    dw `33330003
+    dw `30330003
+    dw `33000033
+    dw `33333333
+    ; 6
+    dw `33333333
+    dw `33000033
+    dw `30033333
+    dw `30000033
+    dw `30033003
+    dw `30033003
+    dw `33000033
+    dw `33333333
+    ; 7
+    dw `33333333
+    dw `30000003
+    dw `33333003
+    dw `33330033
+    dw `33300333
+    dw `33000333
+    dw `33000333
+    dw `33333333
+    ; 8
+    dw `33333333
+    dw `33000033
+    dw `30333003
+    dw `33000033
+    dw `30333003
+    dw `30333003
+    dw `33000033
+    dw `33333333
+    ; 9
+    dw `33333333
+    dw `33000033
+    dw `30330003
+    dw `30330003
+    dw `33000003
+    dw `33330003
+    dw `33000033
+    dw `33333333
+
 TilesEnd:
 
 Ball:
@@ -792,3 +933,6 @@ wFrameCounter: db
 SECTION "Ball Data", WRAM0
 wBallMomentumX: db
 wBallMomentumY: db
+
+SECTION "Score", WRAM0
+wScore: db
